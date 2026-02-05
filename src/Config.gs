@@ -15,7 +15,7 @@ function getConfig() {
   return {
     LINE_CHANNEL_ACCESS_TOKEN: props.getProperty('LINE_CHANNEL_ACCESS_TOKEN'),
     GMAIL_LABEL: gmailLabel,
-    GMAIL_QUERY: `is:unread label:${gmailLabel}`,
+    GMAIL_QUERY: `is:unread label:${gmailLabel} from:noreply@garmin.com subject:LiveTrack`,
     MAX_BODY_LENGTH: maxBodyLength
   };
 }
