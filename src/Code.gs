@@ -58,11 +58,12 @@ function getGmailMessages(config) {
     for (const msg of gmailMessages) {
       if (msg.isUnread()) {
         const from = msg.getFrom();
+        const replyTo = msg.getReplyTo();
         const subject = msg.getSubject();
 
-        // Garmin LiveTrackメールのみフィルタリング
-        if (!from.includes('noreply@garmin.com')) {
-          Logger.log(`スキップ: 差出人が一致しません - ${from}`);
+        // Garmin LiveTrackメールのみフィルタリング（返信先でチェック）
+        if (!replyTo || !replyTo.includes('noreply@garmin.com')) {
+          Logger.log(`スキップ: 返信先が一致しません - From: ${from}, Reply-To: ${replyTo}`);
           continue;
         }
 
