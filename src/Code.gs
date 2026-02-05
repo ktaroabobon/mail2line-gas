@@ -249,13 +249,15 @@ function formatLiveTrackMessage(message) {
 
   // メッセージ組み立て
   const lines = [
-    `${name} さんが LiveTrack を開始しました！`
+    `🏃‍♂️ ${name} さんが LiveTrack を開始しました！`
   ];
 
   if (url) {
     lines.push('');
-    lines.push('LiveTrackでアクティビティを表示:');
+    lines.push('📍 リアルタイムで位置を確認:');
     lines.push(url);
+    lines.push('');
+    lines.push('💪 ページに移動して応援メッセージを送って応援しよう!');
   } else {
     // URLが見つからない場合は件名を表示
     lines.push('');
