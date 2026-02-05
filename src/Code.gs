@@ -26,8 +26,8 @@ function main() {
         // LINE通知
         sendLineNotification(config, message);
 
-        // 既読処理
-        markAsRead(message.thread);
+        // 既読処理（個別メッセージのみ）
+        markAsRead(message.gmailMessage);
 
         Logger.log(`処理完了: ${message.subject}`);
       } catch (error) {
@@ -72,7 +72,8 @@ function getGmailMessages(config) {
         }
 
         messages.push({
-          thread: thread,
+          gmailMessage: msg,  // 個別メッセージオブジェクトを追加
+          thread: thread,     // スレッドも保持（情報参照用）
           from: from,
           date: msg.getDate(),
           subject: subject,
@@ -138,12 +139,12 @@ function sendLineNotification(config, message) {
 }
 
 /**
- * スレッドを既読にする
- * @param {GmailThread} thread - Gmailスレッド
+ * メッセージを既読にする
+ * @param {GmailMessage} gmailMessage - Gmailメッセージ
  */
-function markAsRead(thread) {
-  thread.markRead();
-  Logger.log(`既読処理完了: Thread ID ${thread.getId()}`);
+function markAsRead(gmailMessage) {
+  gmailMessage.markRead();
+  Logger.log(`既読処理完了: Message ID ${gmailMessage.getId()}`);
 }
 
 /**
