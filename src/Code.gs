@@ -103,17 +103,36 @@ function sendLineNotification(config, message) {
   }
   Logger.log(`LINE トークン検証: 先頭3文字=${token.substring(0, 3)}***, 長さ=${token.length}文字`);
 
-  const url = 'https://api.line.me/v2/bot/message/broadcast';
-
   // Garmin LiveTrack専用メッセージフォーマット
   const text = formatLiveTrackMessage(message);
 
-  const payload = {
-    messages: [{
-      type: 'text',
-      text: text
-    }]
-  };
+  // エンドポイントとペイロードの決定
+  let url;
+  let payload;
+
+  if (config.LINE_GROUP_IDS && config.LINE_GROUP_IDS.length > 0) {
+    // multicast API（複数グループに一斉送信）
+    url = 'https://api.line.me/v2/bot/message/multicast';
+    payload = {
+      to: config.LINE_GROUP_IDS,  // 配列で複数グループIDを指定
+      messages: [{
+        type: 'text',
+        text: text
+      }]
+    };
+    Logger.log(`multicast APIを使用: ${config.LINE_GROUP_IDS.length}グループに送信`);
+    Logger.log(`送信先グループID: ${config.LINE_GROUP_IDS.map(id => id.substring(0, 5) + '***').join(', ')}`);
+  } else {
+    // broadcast API（友だち全員に送信 - 従来の動作）
+    url = 'https://api.line.me/v2/bot/message/broadcast';
+    payload = {
+      messages: [{
+        type: 'text',
+        text: text
+      }]
+    };
+    Logger.log('broadcast APIを使用（後方互換モード - グループID未設定）');
+  }
 
   const options = {
     method: 'post',
@@ -340,4 +359,159 @@ function runAllTests() {
   Logger.log('========================================');
   Logger.log('全テスト完了');
   Logger.log('========================================');
+}
+
+// ======================
+// Webhook受信関数
+// ======================
+
+/**
+ * LINE Webhookリクエストを受信
+ * /subscribe, /unsubscribe コマンドでグループを管理
+ * @param {Object} e - HTTPリクエストイベント
+ */
+function doPost(e) {
+  try {
+    const json = JSON.parse(e.postData.contents);
+    Logger.log(`Webhook受信: ${JSON.stringify(json, null, 2)}`);
+
+    // イベント処理
+    if (json.events && json.events.length > 0) {
+      for (const event of json.events) {
+        // メッセージイベントかつグループの場合
+        if (event.type === 'message' &&
+            event.message.type === 'text' &&
+            event.source && event.source.type === 'group') {
+
+          const groupId = event.source.groupId;
+          const messageText = event.message.text.trim();
+
+          Logger.log(`グループメッセージ受信: ${groupId}, テキスト: ${messageText}`);
+
+          // /subscribe コマンド
+          if (messageText.includes('/subscribe')) {
+            const added = addGroupId(groupId);
+            if (added) {
+              sendReplyMessage(event.replyToken,
+                '✅ このグループが通知先として登録されました！\n' +
+                'Garmin LiveTrackの通知をこのグループに送信します。');
+            } else {
+              sendReplyMessage(event.replyToken,
+                'ℹ️ このグループは既に通知先として登録されています。');
+            }
+          }
+          // /unsubscribe コマンド
+          else if (messageText.includes('/unsubscribe')) {
+            const removed = removeGroupId(groupId);
+            if (removed) {
+              sendReplyMessage(event.replyToken,
+                '🔕 このグループの通知登録を解除しました。\n' +
+                '再度通知を受け取る場合は /subscribe を送信してください。');
+            } else {
+              sendReplyMessage(event.replyToken,
+                'ℹ️ このグループは通知先として登録されていません。');
+            }
+          }
+        }
+      }
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ status: 'ok' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    Logger.log(`Webhook処理エラー: ${error.message}`);
+    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: error.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
+ * グループIDをスクリプトプロパティに追加（重複チェック付き）
+ * @param {string} groupId - グループID
+ * @returns {boolean} 追加されたかどうか（true: 新規追加, false: 既存）
+ */
+function addGroupId(groupId) {
+  const props = PropertiesService.getScriptProperties();
+  const groupIdsJson = props.getProperty('LINE_GROUP_IDS') || '[]';
+  const groupIds = JSON.parse(groupIdsJson);
+
+  // 重複チェック
+  if (!groupIds.includes(groupId)) {
+    groupIds.push(groupId);
+    props.setProperty('LINE_GROUP_IDS', JSON.stringify(groupIds));
+    Logger.log(`グループID追加: ${groupId} (合計: ${groupIds.length}グループ)`);
+    return true;
+  } else {
+    Logger.log(`グループID既存: ${groupId}`);
+    return false;
+  }
+}
+
+/**
+ * グループIDをスクリプトプロパティから削除
+ * @param {string} groupId - グループID
+ * @returns {boolean} 削除されたかどうか（true: 削除成功, false: 存在しない）
+ */
+function removeGroupId(groupId) {
+  const props = PropertiesService.getScriptProperties();
+  const groupIdsJson = props.getProperty('LINE_GROUP_IDS') || '[]';
+  const groupIds = JSON.parse(groupIdsJson);
+
+  const index = groupIds.indexOf(groupId);
+  if (index !== -1) {
+    groupIds.splice(index, 1);
+    props.setProperty('LINE_GROUP_IDS', JSON.stringify(groupIds));
+    Logger.log(`グループID削除: ${groupId} (残り: ${groupIds.length}グループ)`);
+    return true;
+  } else {
+    Logger.log(`グループID未登録: ${groupId}`);
+    return false;
+  }
+}
+
+/**
+ * グループに返信メッセージを送信（Reply Token使用）
+ * @param {string} replyToken - Reply Token
+ * @param {string} text - 返信メッセージ
+ */
+function sendReplyMessage(replyToken, text) {
+  const config = getConfig();
+  const token = config.LINE_CHANNEL_ACCESS_TOKEN;
+
+  if (!token) {
+    Logger.log('警告: トークンが未設定のため返信できません');
+    return;
+  }
+
+  const url = 'https://api.line.me/v2/bot/message/reply';
+  const payload = {
+    replyToken: replyToken,
+    messages: [{
+      type: 'text',
+      text: text
+    }]
+  };
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const statusCode = response.getResponseCode();
+
+    if (statusCode >= 200 && statusCode < 300) {
+      Logger.log(`返信メッセージ送信成功`);
+    } else {
+      Logger.log(`返信メッセージ送信失敗: ${statusCode} - ${response.getContentText()}`);
+    }
+  } catch (error) {
+    Logger.log(`返信メッセージ送信エラー: ${error.message}`);
+  }
 }
