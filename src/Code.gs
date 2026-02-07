@@ -158,16 +158,20 @@ function sendLineNotification(config, message) {
     const successCount = results.filter(r => r.success).length;
     Logger.log(`📊 送信結果: ${successCount}/${config.LINE_GROUP_IDS.length}グループに成功`);
 
-    // 全て失敗した場合のみエラー
+    // 全て失敗した場合も警告のみ（broadcast処理は継続）
     if (successCount === 0) {
-      throw new Error('全てのグループへの送信が失敗しました');
+      Logger.log('⚠️ 警告: 全てのグループへの送信が失敗しました（broadcast処理は継続します）');
     }
 
-    return; // 早期リターン（broadcast処理をスキップ）
+    // broadcast処理も実行するため削除
   }
 
-  // グループIDが未設定の場合は従来通りbroadcast API（友だち全員に送信）
-  Logger.log('broadcast APIを使用（後方互換モード - グループID未設定）');
+  // broadcast API（友だち全員に送信）
+  if (config.LINE_GROUP_IDS && config.LINE_GROUP_IDS.length > 0) {
+    Logger.log('broadcast APIを使用: 個人チャット（友だち）にも送信');
+  } else {
+    Logger.log('broadcast APIを使用（後方互換モード - グループID未設定）');
+  }
 
   const url = 'https://api.line.me/v2/bot/message/broadcast';
   const payload = {
@@ -193,12 +197,12 @@ function sendLineNotification(config, message) {
 
   // 2xx系ステータスコードを成功として判定
   if (statusCode < 200 || statusCode >= 300) {
-    Logger.log(`LINE API Error: ステータス=${statusCode}, レスポンス=${responseBody}`);
-    throw new Error(`LINE API Error: ${statusCode} - ${responseBody}`);
+    Logger.log(`✗ broadcast API送信失敗: ${statusCode} - ${responseBody}`);
+    throw new Error(`broadcast API Error: ${statusCode} - ${responseBody}`);
   }
 
   // 成功時のログ
-  Logger.log(`LINE API Success: ステータス=${statusCode}, レスポンス=${responseBody}`);
+  Logger.log(`✓ broadcast API送信成功: ステータス=${statusCode}`);
 }
 
 /**
