@@ -106,33 +106,76 @@ function sendLineNotification(config, message) {
   // Garmin LiveTrack専用メッセージフォーマット
   const text = formatLiveTrackMessage(message);
 
-  // エンドポイントとペイロードの決定
-  let url;
-  let payload;
-
+  // グループIDが設定されている場合は各グループに個別送信
   if (config.LINE_GROUP_IDS && config.LINE_GROUP_IDS.length > 0) {
-    // multicast API（複数グループに一斉送信）
-    url = 'https://api.line.me/v2/bot/message/multicast';
-    payload = {
-      to: config.LINE_GROUP_IDS,  // 配列で複数グループIDを指定
-      messages: [{
-        type: 'text',
-        text: text
-      }]
-    };
-    Logger.log(`multicast APIを使用: ${config.LINE_GROUP_IDS.length}グループに送信`);
-    Logger.log(`送信先グループID: ${config.LINE_GROUP_IDS.map(id => id.substring(0, 5) + '***').join(', ')}`);
-  } else {
-    // broadcast API（友だち全員に送信 - 従来の動作）
-    url = 'https://api.line.me/v2/bot/message/broadcast';
-    payload = {
-      messages: [{
-        type: 'text',
-        text: text
-      }]
-    };
-    Logger.log('broadcast APIを使用（後方互換モード - グループID未設定）');
+    // push API（各グループに個別送信）
+    Logger.log(`push APIを使用: ${config.LINE_GROUP_IDS.length}グループに送信`);
+
+    const results = [];
+
+    for (const groupId of config.LINE_GROUP_IDS) {
+      try {
+        // push APIで単一グループに送信
+        const url = 'https://api.line.me/v2/bot/message/push';
+        const payload = {
+          to: groupId,  // 単一のグループID
+          messages: [{
+            type: 'text',
+            text: text
+          }]
+        };
+
+        const options = {
+          method: 'post',
+          contentType: 'application/json',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          payload: JSON.stringify(payload),
+          muteHttpExceptions: true
+        };
+
+        // API呼び出し
+        const response = UrlFetchApp.fetch(url, options);
+        const statusCode = response.getResponseCode();
+        const responseBody = response.getContentText();
+
+        // 結果を記録
+        if (statusCode >= 200 && statusCode < 300) {
+          results.push({ groupId, success: true });
+          Logger.log(`✓ グループ ${groupId.substring(0, 5)}*** に送信成功`);
+        } else {
+          results.push({ groupId, success: false, error: responseBody });
+          Logger.log(`✗ グループ ${groupId.substring(0, 5)}*** に送信失敗: ${statusCode} - ${responseBody}`);
+        }
+      } catch (e) {
+        results.push({ groupId, success: false, error: e.message });
+        Logger.log(`✗ グループ ${groupId.substring(0, 5)}*** 例外発生: ${e.message}`);
+      }
+    }
+
+    // 結果サマリー
+    const successCount = results.filter(r => r.success).length;
+    Logger.log(`📊 送信結果: ${successCount}/${config.LINE_GROUP_IDS.length}グループに成功`);
+
+    // 全て失敗した場合のみエラー
+    if (successCount === 0) {
+      throw new Error('全てのグループへの送信が失敗しました');
+    }
+
+    return; // 早期リターン（broadcast処理をスキップ）
   }
+
+  // グループIDが未設定の場合は従来通りbroadcast API（友だち全員に送信）
+  Logger.log('broadcast APIを使用（後方互換モード - グループID未設定）');
+
+  const url = 'https://api.line.me/v2/bot/message/broadcast';
+  const payload = {
+    messages: [{
+      type: 'text',
+      text: text
+    }]
+  };
 
   const options = {
     method: 'post',
